@@ -85,40 +85,41 @@ The raw export (`clinic_visits_2025.csv`, 2,423 rows × 13 columns) contained si
 
 ---
 
-## Viva & Technical Defense (Interview Q&A)
+## Analytical Methodology & Edge-Case Decisions
 
-### 1. Why did you keep the ₹50,000 fees when the outlier rule flagged them?
->
-> Statistical outlier rules (like 1.5×IQR) only flag values that deviate from the normal distribution—they do not mean the data is incorrect. In a hospital, ₹50,000 fees reflect genuine high-cost surgical procedures in Cardiology and Orthopedics. Dropping them would falsely understate actual clinic revenue. Instead of deleting valid data, I preserved them and tagged them with an `is_procedure` boolean flag.
+### Why keep ₹50,000 procedure fees despite the 1.5×IQR outlier flag?
 
-### 2. Your first date parse produced 83 Sunday visits. How did you catch it, and how did you fix it?
->
-> I verified the parsed dates by extracting the day of the week (`.dt.day_name()`) and checking frequency counts. Because MediCare is closed on Sundays, finding 83 Sunday visits was immediate proof of a parsing bug. The issue arose because `pd.to_datetime(..., format="mixed", dayfirst=True)` misinterpreted ISO dates like `2025-11-12` as December 11 instead of November 12. I fixed this by splitting the column into three regex masks (`/`, alpha, and ISO) and parsing each format explicitly.
+Statistical outlier rules (like the 1.5×IQR fence) flag distributional skewness, not data corruption. In a multi-specialty outpatient hospital, ₹50,000 charges correspond to valid surgical and cardiac procedures performed in Cardiology and Orthopedics. Discarding these rows would artificially deflate total clinic revenue and misrepresent clinical throughput. Instead of dropping legitimate records, we preserved them in the dataset and established an explicit boolean indicator (`is_procedure = fee >= 50000`) to separate routine visit economics from procedure-based billing.
 
-### 3. Why per-department median for missing fees instead of the overall median or the mean?
->
-> Different hospital specialties have fundamentally different pricing tiers—Cardiology's typical visit (₹1,260) costs nearly 2.5× General Medicine (₹520). A clinic-wide median would systematically undercharge Cardiology and overcharge General Medicine. Furthermore, we use the median rather than the mean because the ₹50,000 procedure outliers heavily skew the average upward.
+### Root cause and remediation for the Sunday parsing anomaly
 
-### 4. Cardiology's mean fee is ₹2,021 and its median is ₹1,260. Which one goes in the annual report?
->
-> The **median (₹1,260)** must be published in the annual report. The mean (₹2,021) is artificially inflated by a tiny fraction of surgical procedures, giving prospective patients a misleading impression of what a typical visit costs. If the administrator wants to report both, they should separate "Routine Consultations (Median: ₹1,260)" from "Specialized Procedures".
+Automated date parsers configured with `dayfirst=True` failed silently on standard ISO strings (`YYYY-MM-DD`), misinterpreting dates such as `2025-11-12` as December 11 instead of November 12. Because MediCare is strictly closed on Sundays, extracting day-of-week frequencies revealed 83 phantom Sunday visits—providing definitive proof of silent parsing distortion. The solution was to partition the column into three discrete regular-expression masks corresponding to each format pattern (`DD/MM/YYYY`, `DD-Mon-YYYY`, and `YYYY-MM-DD`) and parse each slice with strict, explicit format strings, achieving zero unparsed records and exactly zero Sunday visits.
 
-### 5. What is one decision in your log you would change if you had more data?
->
-> Rejecting the two impossible age records (412 and 199). Because I had no external patient registry, dropping those rows was the only responsible option to avoid corrupting the age-correlation regression. If I had access to a Master Patient Index linking `patient_id` with birth dates or government IDs, I would recover the true ages instead of discarding patient data.
+### Rationale for specialty-level median fee imputation
+
+Consultation fees are governed by medical specialty rather than hospital-wide averages. A routine General Medicine visit has a median fee of ₹520, whereas specialized Cardiology consultations command a median of ₹1,260. Imputing with a clinic-wide global metric would systematically over-impute inexpensive general consultations and under-impute specialized visits. Furthermore, because specialized departments include high-value surgical procedures, department means are distorted (Cardiology mean: ₹2,019 vs. median: ₹1,260). Using the group-level median (`transform("median")`) ensures imputed values reflect the central tendency of the appropriate peer group without contamination from extreme outliers.
+
+### Metric selection for clinic reporting: Mean vs. Median
+
+When reporting typical consultation costs for the annual report, the median fee should be published rather than the arithmetic mean. In departments with procedure volume (Cardiology and Orthopedics), the arithmetic mean is upwardly skewed by ₹750 to ₹900 due to extreme ₹50,000 charges. Presenting the mean fee of ₹2,019 in Cardiology would misrepresent typical patient out-of-pocket costs. The median of ₹1,260 reflects the true 50th percentile baseline that incoming patients can expect.
+
+### Limitations and future data enrichment
+
+The data cleaning strategy rejected two records with impossible patient ages (412 and 199) because age was an essential regressor for consultation modeling and no secondary demographic fields existed to infer the true values. While dropping was the only methodologically defensible choice within the isolated dataset, access to a Master Patient Index linking `patient_id` to external health records or national identity databases would allow deterministic recovery of corrupted timestamps and patient ages, eliminating data loss altogether.
 
 ---
 
 ## Repository Structure
 
-```
+``` text
+
 clinic_visits_analysis/
 ├── clinic_visits_2025.csv              # Raw visit records (~2,400 rows)
 ├── clinic_visits_clean.csv             # Cleaned production dataset (2,398 rows)
 ├── clinic_visits_analysis_student.ipynb # End-to-end analysis notebook
 ├── data_quality_log.xlsx               # 7-point data quality & governance log
 ├── requirements.txt                    # Project dependencies
-└── README.md                           # Project showcase & interview defense
+└── README.md                           # Project showcase & methodology
 ```
 
 ### Reproducibility
